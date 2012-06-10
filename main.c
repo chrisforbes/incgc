@@ -44,9 +44,13 @@ struct obj {
 struct arena_meta_a { int nextcell; struct gs * gs; };
 struct arena_meta_b { int dummy; };
 
+/* if sizeof(sym) > c, then fails build with -ve array size */
+#define CHECK_NOT_BIGGER_THAN(sym, c) \
+	int sym##____too_big[ (c) - (int)sizeof( struct sym ) ]
+
 struct check_sizes {
-	int meta_a_too_big[ 16 - (int)sizeof( struct arena_meta_a ) ];
-	int meta_b_too_big[ 16 - (int)sizeof( struct arena_meta_b ) ];
+	CHECK_NOT_BIGGER_THAN( arena_meta_a, 16 );
+	CHECK_NOT_BIGGER_THAN( arena_meta_b, 16 );
 };
 
 struct arena {
