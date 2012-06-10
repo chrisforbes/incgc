@@ -74,7 +74,7 @@ struct arena * arena_new(void) {
 
 struct obj * arena_alloc(struct arena * a, size_t objsize) {
 	if (objsize < sizeof(struct obj))
-		return 0;
+		return 0; /* can't allocate less than a gc header */
 
 	int numunits = (objsize + ALLOC_UNIT - 1) >> 4;
 
@@ -152,6 +152,11 @@ static inline struct obj * gs_pop(struct arena * a) {
 
 /* real meat ------------------------------------------------------------- */
 
+#define IS_MARKED(a,c)\
+	((a)->mark[(c) >> 5] & ((c) & 0x1f))
+#define MARK(a,c)\
+	do { (a)->mark[(c) >> 5] |= ((c) & 0x1f); } while(0)
+
 /* after writing a ptr field in an object, reachability can change, so make
  * the object gray. if it is now dark-gray, push it back onto the gs for its
  * arena. */
@@ -160,7 +165,7 @@ void write_barrier(struct obj * o) {
 	o->gray = 1;
 	struct arena * a = get_arena(o);
 	size_t cell = (size_t)o - (size_t)a;
-	if (a->mark[cell >> 5] & (cell & 0x1f))
+	if (IS_MARKED(a, cell))
 		gs_push(a, o);
 }
 
@@ -171,11 +176,15 @@ int mark(struct arena * a) {
 
 	/* make it black */
 	size_t cell = (size_t)o - (size_t)a;
-	a->mark[cell >> 5] |= (cell & 0x1f);
+	MARK(a, cell);
 	o->gray = 0;
 
 	/* TODO: walk pointers from this object, and
-	 * push them onto their arena's gs. */
+	 * push them onto their arena's gs.
+	 *
+	 * This is heavily dependent on the structure of the actual
+	 * objects!
+	 * */
 
 	return 1;
 }
