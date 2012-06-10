@@ -17,7 +17,6 @@
 
 #define __noreturn __attribute__((noreturn))
 #define __pure __attribute__((pure))
-#define __unused __attribute__((unused))
 
 void __noreturn die(int exitcode, char const * p, ...) {
 	va_list vl;
@@ -28,10 +27,10 @@ void __noreturn die(int exitcode, char const * p, ...) {
 	exit(exitcode);
 }
 
-struct gs {
-	int n;
-	struct gs * prev;
-	struct obj * data[GS_SIZE];
+/* header of an object on the gc heap */
+struct obj {
+	unsigned char gray:1;
+	unsigned char type:7;
 };
 
 /* because the used/mark arrays are at the start of the arena, 
@@ -45,6 +44,11 @@ struct gs {
 struct arena_meta_a { int nextcell; struct gs * gs; };
 struct arena_meta_b { int dummy; };
 
+struct check_sizes {
+	int meta_a_too_big[ 16 - (int)sizeof( struct arena_meta_a ) ];
+	int meta_b_too_big[ 16 - (int)sizeof( struct arena_meta_b ) ];
+};
+
 struct arena {
 	union {
 		int used[ARENA_SIZE / ALLOC_UNIT / sizeof(int) / 8];
@@ -55,14 +59,6 @@ struct arena {
 		struct arena_meta_b b;
 	};
 	/* 64K - sizeof(struct arena) of data follows */
-};
-
-/*
- * An actual object in the GC heap. Always in an arena!
- */
-struct obj {
-	unsigned char gray:1;
-	unsigned char type:7;
 };
 
 struct arena * arena_new(void) {
@@ -76,7 +72,10 @@ struct arena * arena_new(void) {
 	return a;
 }
 
-struct obj * arena_alloc(struct arena * a, int objsize) {
+struct obj * arena_alloc(struct arena * a, size_t objsize) {
+	if (objsize < sizeof(struct obj))
+		return 0;
+
 	int numunits = (objsize + ALLOC_UNIT - 1) >> 4;
 
 	/* TODO: add first-fit or best-fit strategies when
@@ -98,9 +97,19 @@ static inline struct arena * get_arena(struct obj * o) {
 	return (struct arena *)( s & ~((size_t)0x0ffff) );
 }
 
-/* stash of graystacks we're not using currently */
+/* gray stacks ----------------------------------------------------------- */
+
+struct gs {
+	int n;
+	struct gs * prev;
+	struct obj * data[GS_SIZE];
+};
+
+/* stash of a few gs chunks, to avoid churning the system
+ * allocator during marking */
 static struct gs * spare_gs = 0;
 
+/* get a gs chunk from the stash, or alloc a new one. */
 static inline struct gs * gs_get(void) {
 	if (!spare_gs)
 		return malloc(sizeof(struct gs));
@@ -110,11 +119,13 @@ static inline struct gs * gs_get(void) {
 	return gs;
 }
 
+/* put a gs chunk back into the stash */
 static inline void gs_put(struct gs * gs) {
 	gs->prev = spare_gs;
 	spare_gs = gs->prev;
 }
 
+/* push an object onto its arena's gs */
 static inline void gs_push(struct arena * a, struct obj * o) {
 	if (!a->a.gs || a->a.gs->n == GS_SIZE) {
 		struct gs * prev = a->a.gs;
@@ -127,6 +138,7 @@ static inline void gs_push(struct arena * a, struct obj * o) {
 	gs->data[ GS_SIZE - ++gs->n ] = o;
 }
 
+/* pop the first object off an arena's gs */
 static inline struct obj * gs_pop(struct arena * a) {
 	struct gs * gs = a->a.gs;
 	if (!gs) return 0;
@@ -138,6 +150,11 @@ static inline struct obj * gs_pop(struct arena * a) {
 	return o;
 }
 
+/* real meat ------------------------------------------------------------- */
+
+/* after writing a ptr field in an object, reachability can change, so make
+ * the object gray. if it is now dark-gray, push it back onto the gs for its
+ * arena. */
 void write_barrier(struct obj * o) {
 	if (o->gray) return;
 	o->gray = 1;
@@ -147,19 +164,23 @@ void write_barrier(struct obj * o) {
 		gs_push(a, o);
 }
 
-void mark(struct arena * a) {
+/* pop the first object off an arena's gs, and mark it. */
+int mark(struct arena * a) {
 	struct obj * o = gs_pop(a);
-	if (!o) return;
+	if (!o) return 0;
 
 	/* make it black */
 	size_t cell = (size_t)o - (size_t)a;
 	a->mark[cell >> 5] |= (cell & 0x1f);
 	o->gray = 0;
 
-	/* walk pointers from this object, and
+	/* TODO: walk pointers from this object, and
 	 * push them onto their arena's gs. */
+
+	return 1;
 }
 
+/* sweep away all unmarked objects remaining in an arena */
 void sweep(struct arena * a) {
 	if (a->a.gs && a->a.gs->n)
 		die( 1, "broken GC: arena %p had things remaining to mark", a);
@@ -174,11 +195,20 @@ void sweep(struct arena * a) {
 	}
 }
 
+/* test driver code ------------------------------------------------------ */
+
 int main(void) {
 	printf( "sizes: arena meta: %zd a: %zd b: %zd: gs: %zd\n",
 			sizeof(struct arena),
 			sizeof(struct arena_meta_a),
 			sizeof(struct arena_meta_b),
 			sizeof(struct gs));
+
+	struct arena * a = arena_new();
+	struct obj * o = arena_alloc(a, 32);
+
+	if (!o)
+		die( 1, "failed: alloc object from %p", a );
+
 	return 0;
 }
