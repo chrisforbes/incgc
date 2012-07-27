@@ -14,7 +14,7 @@ XCFLAGS := $(shell pkg-config --cflags $(LIBS))
 XLDFLAGS := $(shell pkg-config --libs $(LIBS))
 
 $(TARGET): $(COBJ) Makefile
-	@echo LINK $(COBJ) -> $@
+	@echo LINK $(COBJ) '->' $@
 	@$(CC) -o $@ $(COBJ) $(XLDFLAGS) $(LDFLAGS)
 
 clean:
