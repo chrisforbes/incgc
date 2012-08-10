@@ -4,7 +4,7 @@
 
 TARGET := incgc
 CSRC := $(shell find . -iname '*.c')
-LIBS := sdl
+LIBS :=
 CFLAGS := -O2 -pipe -Wall -Wextra -Werror
 LDFLAGS := 
 

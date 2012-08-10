@@ -10,8 +10,11 @@
 
 CC := gcc
 COBJ := $(CSRC:.c=.o)
+
+ifneq ($(LIBS),)
 XCFLAGS := $(shell pkg-config --cflags $(LIBS))
 XLDFLAGS := $(shell pkg-config --libs $(LIBS))
+endif
 
 $(TARGET): $(COBJ) Makefile
 	@echo LINK $(COBJ) '->' $@
