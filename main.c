@@ -126,7 +126,7 @@ static inline struct gs * gs_get(void) {
 /* put a gs chunk back into the stash */
 static inline void gs_put(struct gs * gs) {
 	gs->prev = spare_gs;
-	spare_gs = gs->prev;
+	spare_gs = gs;
 }
 
 /* push an object onto its arena's gs */
